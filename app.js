@@ -122,14 +122,17 @@ function analyze(inputRows) {
     const aboveBothBaselines=(total/base.employee)>=8 && (total/base.department)>=8;
     const completed=records.at(-1).request_status==='completed';
     const failedCost=records.filter(r=>r.request_status==='failed').reduce((s,r)=>s+r.cost,0);
-    // A ratio measures unusualness; a modest-dollar guardrail keeps tiny completed episodes out of IT's queue.
-    // This is not a $100 gate: material retries, one-off spikes, and sustained projects each have a path.
+    // Relative distance measures unusualness; observed organization and department
+    // spend determine whether the financial impact is material enough to review.
     const local=localScale(first.department);
     const materialRetry=failed>=2&&failedCost>=local.material&&failedCost>=8*base.department;
     const spendCandidate=scale.usable&&((total>=local.fence&&total>=local.material&&aboveBothBaselines)||materialRetry);
     // Failed attempts that repeat one request until it succeeds: same content, retried.
     const retryLoop=failed>=2&&completed&&new Set(records.map(r=>normalize(r.input_excerpt))).size<=2;
-    if (retryLoop) {
+    // Completion explains the repetition, not the financial impact. Keep a modest
+    // completed retry loop out of the queue, but surface one whose failed spend
+    // is materially unusual against the same employee/department baselines.
+    if (retryLoop && !spendCandidate) {
       decisions.push({type:'spend',label:'Completed retry loop',detail:`${failed} of ${records.length} attempts failed, incurring ${money(failedCost)}, but each was a retry of the same request and the workflow completed. Total cost was ${money(total)}.`,outcome:'No review',records});
     } else if (spendCandidate) {
       const sensitiveCase=cases.find(c=>c.id===id&&c.type==='sensitive');
@@ -196,6 +199,7 @@ function analyze(inputRows) {
     const sentAll=records.filter(r=>r.content_signal&&r.content_signal!=='none'&&r.request_status!=='blocked_before_sending');
     const personalAll=sentAll.filter(r=>r.account_type==='personal').length;
     const peakAll=sentAll.reduce((peak,r)=>Math.max(peak,Number(r.confidence)||0),0);
+    const repeatedKind=sentAll.some(r=>r.content_signal==='possible_credentials')?'credential-shaped content':sentAll.some(r=>r.content_signal==='possible_customer_data')?'possible customer data':sentAll.some(r=>r.content_signal==='possible_personal_data')?'possible personal data':'sensitive-looking content';
     const mergedWhy=[
       `The same content repeated across ${sessionCount} separate sessions`,
       `${sentAll.length} signaled request${sentAll.length===1?' was':'s were'} not blocked before sending`,
@@ -204,11 +208,13 @@ function analyze(inputRows) {
     ].filter(Boolean);
     const merged={...lead,id:`${lead.employee}-template-${lead.records[0].request_id}`,records,
       total:records.reduce((sum,r)=>sum+r.cost,0),recommendation:'Review',
-      title:`Repeated content shared through a ${lead.records.some(r=>r.account_type==='personal')?'personal':'company'} AI account`,
-      summary:`${records.length} requests across ${sessionCount} sessions carried the same content, differing only by a number.`,
-      what:`${lead.employee} made ${records.length} requests in ${lead.tool} whose content is identical apart from a changing index. The detector signalled each one.`,
+      title:`Repeated ${repeatedKind} on a ${lead.records.some(r=>r.account_type==='personal')?'personal':'company'} AI account`,
+      summary:`${records.length} requests across ${sessionCount} sessions carried the same ${repeatedKind}, differing only by a number.`,
+      what:`${lead.employee} made ${records.length} requests in ${lead.tool} whose content is identical apart from a changing index. The detector signalled each one, but repetition alone cannot distinguish sample material from a repeated disclosure.`,
       why:mergedWhy,
-      unknown:['Whether this is templated or sample material, or the same disclosure repeated',...lead.unknown]};
+      unknown:['Whether this is templated or sample material, or the same disclosure repeated',...lead.unknown],
+      next:'Determine whether the repeated content was real or sample material',
+      nextCopy:'Verify whether this was templated or example content, or a repeated disclosure, and whether use of this account was approved.'};
     for(const c of group)cases.splice(cases.indexOf(c),1);
     cases.push(merged);
   }
