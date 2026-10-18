@@ -4,14 +4,18 @@ A review queue for IT admins: it reads a CSV of employee AI usage, raises the
 activity worth a look, explains the activity it deliberately did not raise, and
 lets the reviewer act on either.
 
-## Run
+**Live: https://pannisy.github.io/ai-usage-triage/**
+
+## Run it locally
 
 ```bash
 python3 -m http.server 4173
 ```
 
-Then open http://localhost:4173. A server is required — `app.js` fetches
-`assets/employee_ai_usage.csv`, which browsers block on `file://`.
+Then open http://localhost:4173. A server is needed rather than opening the
+file directly: `app.js` fetches `assets/employee_ai_usage.csv` at runtime so the
+dataset can be swapped without touching code, and browsers block that on
+`file://`.
 
 ## Files
 
